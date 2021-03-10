@@ -73,20 +73,20 @@ void GetBatteryLoop(void*) {
         psmGetBatteryChargeInfoFields(psmService, _batteryChargeInfoFields);
         snprintf(Print_x, sizeof(Print_x), 
             "Input Current Limit: %u mA"
-            "\nVBUS Current Limit: %u mA" 
-            "\nBattery Charging Current Limit: %u mA" 
-            "\nBattery Charging Voltage Limit: %u mV" 
+            "\nOutput Current Limit: %u mA" 
+            "\nBattery Charging Limit:" 
+            "\n            %u mV, %u mV" 
             "\nunk_x10: 0x%08" PRIx32 
             "\nunk_x14: 0x%08" PRIx32 
             "\nPD Controller State: %u" 
-            "\nBattery Temperature: %.1f\u00B0C" 
-            "\nRaw Battery Charge: %.1f%s" 
+            "\nBattery Temperature: %.2f\u00B0C" 
+            "\nRaw Battery Charge: %.2f%s" 
             "\nVoltage Avg: %u mV" 
-            "\nBattery Age: %.1f%s" 
+            "\nBattery Age: %.2f%s" 
             "\nPower Role: %u" 
             "\nCharger Type: %u" 
-            "\nCharger Voltage Limit: %u mV" 
-            "\nCharger Current Limit: %u mA" 
+            "\nCharger Limit:" 
+            "\n            %u mV, %u mA" 
             "\nunk_x3c: 0x%08" PRIx32, 
             _batteryChargeInfoFields->InputCurrentLimit, 
             _batteryChargeInfoFields->VBUSCurrentLimit,
@@ -142,8 +142,8 @@ public:
     }
 
     // Called once every frame to handle inputs not handled by other UI elements
-    virtual bool handleInput(u64 keysDown, u64 keysHeld, touchPosition touchInput, JoystickPosition leftJoyStick, JoystickPosition rightJoyStick) override {
-        if (keysHeld & KEY_A) {
+    virtual bool handleInput(u64 keysDown, u64 keysHeld, touchPosition touchInput, JoystickPosition leftJoyStick, JoystickPosition rightJoyStick) {
+        if (keysHeld & HidNpadButton_A) {
             tsl::hlp::requestForeground(false);
             return true;
         }
