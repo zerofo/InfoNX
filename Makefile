@@ -37,10 +37,10 @@ include $(DEVKITPRO)/libnx/switch_rules
 #   of a homebrew executable (.nro). This is intended to be used for sysmodules.
 #   NACP building is skipped as well.
 #---------------------------------------------------------------------------------
-APP_TITLE	:=	BatteryChargeInfoNX
+APP_TITLE	:=	InfoNX
 APP_VERSION	:=	1.0.0
 
-TARGET		:=	BatteryChargeInfoNX-ovl
+TARGET		:=	InfoNX-ovl
 BUILD		:=	build
 SOURCES		:=	source
 DATA		:=	data
