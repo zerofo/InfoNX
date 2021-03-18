@@ -9,9 +9,13 @@
 #include "rgltr.h"
 
 #define SET_MAX_FREQ 0
-#define MAX_CPU_FREQ 2397000000
+#define MAX_CPU_FREQ 2295000000
 #define MAX_GPU_FREQ 1536000000
 #define MAX_EMC_FREQ 1862400000
+
+#define IS_BAT_CHARGE_ON ((_batteryChargeInfoFields->unk_x14 >> 8) & 1)
+#define BAT_CHARGE_THRESHOLD 90
+//#define DEBUG_LOGIC
 
 /* rgltr and clk-test are from ZatchyCatGames#6421 */
 
@@ -157,6 +161,12 @@ typedef enum {
     AcceptedRDO          = 3  //Received and accepted Request Data Object
 } BatteryChargeInfoFieldsPDControllerState; //BM92T series
 
+const char* strPDControllerState[] = {
+    "Received new PDO",
+    "No PD Source",
+    "Received/Accpted RDO"
+};
+
 typedef enum {
     None         = 0,
     PD           = 1,
@@ -170,10 +180,28 @@ typedef enum {
     Apple_2000mA = 9
 } BatteryChargeInfoFieldsChargerType;
 
+const char* strChargerType[] = {
+    "None",
+    "PD",
+    "USB-C@1.5A",
+    "USB-C@3.0A",
+    "USB-DCP",
+    "USB-CDP",
+    "USB-SDP",
+    "Apple@0.5A",
+    "Apple@1.0A",
+    "Apple@2.0A",
+};
+
 typedef enum {
     Sink         = 1,
     Source       = 2
 } BatteryChargeInfoFieldsPowerRole;
+
+const char* strPowerRole[] = {
+    "Sink",
+    "Source",
+};
 
 typedef struct {
     int32_t InputCurrentLimit;                                  //Input (Sink) current limit in mA
@@ -198,30 +226,124 @@ Result psmGetBatteryChargeInfoFields(Service* psmService, BatteryChargeInfoField
     return serviceDispatchOut(psmService, 17, *out);
 }
 
+static Result psmEnableBatteryCharging(Service* psmService) {
+    return serviceDispatch(psmService, 2);
+}
+
+static Result psmDisableBatteryCharging(Service* psmService) {
+    return serviceDispatch(psmService, 3);
+}
+
+static Result psmEnableFastBatteryCharging(Service* psmService) {
+    return serviceDispatch(psmService, 10);
+}
+
+static Result psmDisableFastBatteryCharging(Service* psmService) {
+    return serviceDispatch(psmService, 11);
+}
+
+FanController g_ICon;
+float rotationSpeedLevel = 0;
+bool reduceBatteryAging = false;
+bool isFastChargingEnabled = false;
+bool isFirstRun = true;
+unsigned int changeReduceBatteryAgingState = 0;
+
+void reduceBatteryAgingInitialize()
+{
+    if(isFirstRun)
+    {
+        static Service* psmService = psmGetServiceSession();
+        psmDisableFastBatteryCharging(psmService); //Since isFastChargingEnabled = false by default
+
+        //In the first run, if battery charging is disabled, then reduceBatteryAging must be true,
+        // which can be used to adopt settings if user has exited InfoNX before.
+        static BatteryChargeInfoFields* _batteryChargeInfoFields = new BatteryChargeInfoFields;
+        psmGetBatteryChargeInfoFields(psmService, _batteryChargeInfoFields);
+        if(!reduceBatteryAging && !IS_BAT_CHARGE_ON)
+            reduceBatteryAging = true;
+
+        isFirstRun = false;
+    }
+}
+
 bool threadexit = false;
-char Print_x[512];
+int32_t socTempMili = 0;
+char Print_x[800];
 Thread t0;
+int logic = 0;
+u32 batCharge = 0;
 
 void Loop(void*) {
     static Service* psmService = psmGetServiceSession();
-    static bool mariko = is_mariko();
     static BatteryChargeInfoFields* _batteryChargeInfoFields = new BatteryChargeInfoFields;
     static ClkFields* _clkFields = new ClkFields;
     while (threadexit == false) {
+        if(changeReduceBatteryAgingState)
+        {
+            changeReduceBatteryAgingState = 0;
+            reduceBatteryAging = !reduceBatteryAging;
+            logic = -1;
+        }
         psmGetBatteryChargeInfoFields(psmService, _batteryChargeInfoFields);
-        clk_check(_clkFields, mariko);
-        snprintf(Print_x, sizeof(Print_x), 
-            "Curr. Limit: %u mA IN, %u mA OUT"
-            "\nBat. Charg. Limit: %u mA, %u mV"
+        clk_check(_clkFields, is_mariko());
+        tsGetTemperatureMilliC(TsLocation_External, &socTempMili);
+        psmGetBatteryChargePercentage(&batCharge);
+
+        //Then check logic, if there's something wrong, then it will adjust to reduceBatteryAging settings.
+        if(!reduceBatteryAging && (!IS_BAT_CHARGE_ON || !isFastChargingEnabled))
+        {
+            //reduceBatteryAging is off, then the other two always set to default.
+            psmEnableBatteryCharging(psmService);
+            psmEnableFastBatteryCharging(psmService);
+            isFastChargingEnabled = true;
+            logic = 1;
+        }
+        else if(!reduceBatteryAging /*&& IS_BAT_CHARGE_ON && isFastChargingEnabled*/)
+        {
+            //reduceBatteryAging is off and the other two set to default, nothing to do.
+            logic = 2;
+        }
+        else if(reduceBatteryAging && isFastChargingEnabled)
+        {
+            //reduceBatteryAging is on, then Fast Charging will be always disabled.
+            psmDisableFastBatteryCharging(psmService);
+            isFastChargingEnabled = false;
+            logic = 3;
+        }
+        else if(batCharge >= BAT_CHARGE_THRESHOLD)
+        {
+            logic = 40;
+            if(IS_BAT_CHARGE_ON)
+            {
+                //If it's >BAT_CHARGE_THRESHOLD% and still charging, then disable charging.
+                psmDisableBatteryCharging(psmService);
+                logic = 41;
+            }
+        }
+        else
+        {
+            logic = 50;
+            if(!IS_BAT_CHARGE_ON)
+            {
+                //Only remains this condition, if it's <=BAT_CHARGE_THRESHOLD% and not charging, then enable it.
+                psmEnableBatteryCharging(psmService);
+                logic = 51;
+            }
+        }
+
+        snprintf(Print_x, sizeof(Print_x),
+            "Current Limit: %u mA IN, %u mA OUT"
+            "\nBattery Charg. Limit: %u mA, %u mV"
             "\nunk_x10: 0x%08" PRIx32
             "\nunk_x14: 0x%08" PRIx32
-            "\nPD Controller State: %u"
+            "\nPD Contr. State: %s (%u)"
             "\nBattery Temp.: %.2f\u00B0C"
-            "\nRaw Bat. Charge: %.2f%s"
+            "\nRaw Battey Charge: %.2f%%"
             "\nVoltage Avg: %u mV"
-            "\nBattery Age: %.2f%s"
-            "\nPower Role: %u"
-            "\nCharger Type: %u"
+            "\nBattery Age: %.2f%%"
+            "\nPower Role: %s (%u)"
+            "\nCharger Type: %s (%u)"
             "\nCharger Limit: %u mV, %u mA"
             "\nunk_x3c: 0x%08" PRIx32
             "\n"
@@ -230,20 +352,28 @@ void Loop(void*) {
             "\nGPU Clock: %6.1f MHz"
             "\nGPU Volt : %6.1f mV\n"
             "\nEMC Clock: %6.1f MHz"
-            "\nEMC Volt : %6.1f mV\n",
+            "\nEMC Volt : %6.1f mV\n"
+            "\nSoC Temp : %2.2f \u00B0C"
+            "\nFan Speed: %2.2f %%\n"
+            "\nReduce Battery Aging (R-Stick): %s"
+            "\n - Enable Slow Charging(0.5A) (%s)\n - Disable Charging > %d%% (%s)"
+            #ifdef DEBUG_LOGIC
+                "\nLogic: %d"
+            #endif
+            ,
             _batteryChargeInfoFields->InputCurrentLimit, 
             _batteryChargeInfoFields->VBUSCurrentLimit,
             _batteryChargeInfoFields->ChargeCurrentLimit,
             _batteryChargeInfoFields->ChargeVoltageLimit, 
             _batteryChargeInfoFields->unk_x10,
             _batteryChargeInfoFields->unk_x14, 
-            _batteryChargeInfoFields->PDControllerState, 
+            strPDControllerState[_batteryChargeInfoFields->PDControllerState], _batteryChargeInfoFields->PDControllerState,
             (float)_batteryChargeInfoFields->BatteryTemperature / 1000, 
-            (float)_batteryChargeInfoFields->RawBatteryCharge / 1000, "%",
+            (float)_batteryChargeInfoFields->RawBatteryCharge / 1000,
             _batteryChargeInfoFields->VoltageAvg,
-            (float)_batteryChargeInfoFields->BatteryAge / 1000, "%",
-            _batteryChargeInfoFields->PowerRole,
-            _batteryChargeInfoFields->ChargerType,
+            (float)_batteryChargeInfoFields->BatteryAge / 1000,
+            strPowerRole[_batteryChargeInfoFields->PowerRole], _batteryChargeInfoFields->PowerRole,
+            strChargerType[_batteryChargeInfoFields->ChargerType], _batteryChargeInfoFields->ChargerType,
             _batteryChargeInfoFields->ChargerVoltageLimit,
             _batteryChargeInfoFields->ChargerCurrentLimit,
             (int32_t)_batteryChargeInfoFields->Flags,
@@ -252,9 +382,18 @@ void Loop(void*) {
             (double)_clkFields->gpu_out_hz / 1000000,
             (double)_clkFields->gpu_out_volt / 1000,
             (double)_clkFields->emc_out_hz / 1000000,
-            (double)_clkFields->emc_out_volt / 1000
+            (double)_clkFields->emc_out_volt / 1000,
+            (float)socTempMili / 1000,
+            rotationSpeedLevel * 100,
+            reduceBatteryAging ? "ON" : "OFF",
+            !isFastChargingEnabled ? "ON" : "OFF",
+            BAT_CHARGE_THRESHOLD,
+            !IS_BAT_CHARGE_ON ? "ON" : "OFF"
+            #ifdef DEBUG_LOGIC
+                ,logic
+            #endif
         );
-        svcSleepThread(500'000'000);
+        svcSleepThread(1000'000'000);
     }
     delete _batteryChargeInfoFields;
     delete _clkFields;
@@ -275,7 +414,7 @@ public:
         auto list = new tsl::elm::List();
         
         list->addItem(new tsl::elm::CustomDrawer([](tsl::gfx::Renderer *renderer, s32 x, s32 y, s32 w, s32 h) {
-            renderer->drawString(Print_x, false, x, y+50, 20, renderer->a(0xFFFF));
+            renderer->drawString(Print_x, false, x, y, 16, renderer->a(0xFFFF));
     }), 500);
 
         // Add the list to the frame for it to be drawn
@@ -288,13 +427,17 @@ public:
 
     // Called once every frame to update values
     virtual void update() override {
-            
+        
     }
 
     // Called once every frame to handle inputs not handled by other UI elements
-    virtual bool handleInput(u64 keysDown, u64 keysHeld, touchPosition touchInput, JoystickPosition leftJoyStick, JoystickPosition rightJoyStick) {
+    virtual bool handleInput(u64 keysDown, u64 keysHeld, const HidTouchState &touchPos, HidAnalogStickState joyStickPosLeft, HidAnalogStickState joyStickPosRight) override {
         if (keysHeld & HidNpadButton_A) {
             tsl::hlp::requestForeground(false);
+            return true;
+        }
+        if (keysHeld & HidNpadButton_StickR) {
+            changeReduceBatteryAgingState++;
             return true;
         }
         return false;   // Return true here to singal the inputs have been consumed
@@ -307,6 +450,10 @@ public:
     virtual void initServices() override {
         smInitialize();
         psmInitialize();
+        tsInitialize();
+        fanInitialize();
+        fanOpenController(&g_ICon, 0x3D000001);
+        reduceBatteryAgingInitialize();
         threadCreate(&t0, Loop, NULL, NULL, 0x4000, 0x3F, -2);
         threadStart(&t0);
     }  // Called at the start to initialize all services necessary for this Overlay
@@ -315,6 +462,9 @@ public:
         threadexit = true;
         threadWaitForExit(&t0);
         threadClose(&t0);
+        fanControllerClose(&g_ICon);
+        fanExit();
+        tsExit();
         psmExit();
         smExit();
     }  // Callet at the end to clean up all services previously initialized
