@@ -273,6 +273,7 @@ char Print_x[800];
 Thread t0;
 int logic = 0;
 u32 batCharge = 0;
+bool IsEnoughPowerSupplied;
 
 void Loop(void*) {
     static Service* psmService = psmGetServiceSession();
@@ -289,6 +290,7 @@ void Loop(void*) {
         clk_check(_clkFields, is_mariko());
         tsGetTemperatureMilliC(TsLocation_External, &socTempMili);
         psmGetBatteryChargePercentage(&batCharge);
+        psmIsEnoughPowerSupplied(&IsEnoughPowerSupplied);
 
         //Then check logic, if there's something wrong, then it will adjust to reduceBatteryAging settings.
         if(!reduceBatteryAging && (!IS_BAT_CHARGE_ON || !isFastChargingEnabled))
@@ -339,13 +341,14 @@ void Loop(void*) {
             "\nunk_x14: 0x%08" PRIx32
             "\nPD Contr. State: %s (%u)"
             "\nBattery Temp.: %.2f\u00B0C"
-            "\nRaw Battey Charge: %.2f%%"
+            "\nRaw Battery Charge: %.2f%%"
             "\nVoltage Avg: %u mV"
             "\nBattery Age: %.2f%%"
             "\nPower Role: %s (%u)"
             "\nCharger Type: %s (%u)"
             "\nCharger Limit: %u mV, %u mA"
             "\nunk_x3c: 0x%08" PRIx32
+            "\nEnough Power Supplied: %s"
             "\n"
             "\nCPU Clock: %6.1f MHz"
             "\nCPU Volt : %6.1f mV\n"
@@ -377,6 +380,7 @@ void Loop(void*) {
             _batteryChargeInfoFields->ChargerVoltageLimit,
             _batteryChargeInfoFields->ChargerCurrentLimit,
             (int32_t)_batteryChargeInfoFields->Flags,
+            IsEnoughPowerSupplied ? "Yes" : "No",
             (double)_clkFields->cpu_out_hz / 1000000,
             (double)_clkFields->cpu_out_volt / 1000,
             (double)_clkFields->gpu_out_hz / 1000000,
@@ -426,9 +430,7 @@ public:
     }
 
     // Called once every frame to update values
-    virtual void update() override {
-        
-    }
+    virtual void update() override {}
 
     // Called once every frame to handle inputs not handled by other UI elements
     virtual bool handleInput(u64 keysDown, u64 keysHeld, const HidTouchState &touchPos, HidAnalogStickState joyStickPosLeft, HidAnalogStickState joyStickPosRight) override {
