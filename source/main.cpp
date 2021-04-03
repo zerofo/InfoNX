@@ -11,10 +11,10 @@
 #define SET_MAX_FREQ 0
 #define MAX_CPU_FREQ 2295000000
 #define MAX_GPU_FREQ 1536000000
-#define MAX_EMC_FREQ 1862400000
+#define MAX_EMC_FREQ 1996800000
 
 #define IS_BAT_CHARGE_ON ((_batteryChargeInfoFields->unk_x14 >> 8) & 1)
-#define BAT_CHARGE_THRESHOLD 90
+#define BAT_CHARGE_THRESHOLD 80
 //#define DEBUG_LOGIC
 
 /* rgltr and clk-test are from ZatchyCatGames#6421 */
@@ -350,16 +350,22 @@ void Loop(void*) {
             "\nunk_x3c: 0x%08" PRIx32
             "\nEnough Power Supplied: %s"
             "\n"
-            "\nCPU Clock: %6.1f MHz"
-            "\nCPU Volt : %6.1f mV\n"
-            "\nGPU Clock: %6.1f MHz"
-            "\nGPU Volt : %6.1f mV\n"
-            "\nEMC Clock: %6.1f MHz"
-            "\nEMC Volt : %6.1f mV\n"
+            "\nCPU: %6.1f MHz, %6.1f mV"
+            "\nGPU: %6.1f MHz, %6.1f mV"
+            "\nEMC: %6.1f MHz, %6.1f mV"
+            "\n"
+            // "\nCPU Clock: %6.1f MHz"
+            // "\nCPU Volt : %6.1f mV"
+            // "\nGPU Clock: %6.1f MHz"
+            // "\nGPU Volt : %6.1f mV"
+            // "\nEMC Clock: %6.1f MHz"
+            // "\nEMC Volt : %6.1f mV"
             "\nSoC Temp : %2.2f \u00B0C"
-            "\nFan Speed: %2.2f %%\n"
-            "\nReduce Battery Aging (R-Stick): %s"
-            "\n - Enable Slow Charging(0.5A) (%s)\n - Disable Charging > %d%% (%s)"
+            "\nFan Speed: %2.2f %%"
+            "\n"
+            "\nReduce Battery Aging Status: %s"
+            "\n - Enable Slow Charging(0.5A) (%s)"
+            "\n - Disable Charging > %d%% (%s)"
             #ifdef DEBUG_LOGIC
                 "\nLogic: %d"
             #endif
@@ -416,14 +422,24 @@ public:
 
         // A list that can contain sub elements and handles scrolling
         auto list = new tsl::elm::List();
+
+        auto *batteryAgingToggle = new tsl::elm::ToggleListItem("Reduce battery aging", reduceBatteryAging);
+        batteryAgingToggle->setClickListener([](u64 keys) {
+            if (keys & HidNpadButton_A) {
+                changeReduceBatteryAgingState++;
+                return true;
+            }
+            return false;
+        });
+
+        list->addItem(batteryAgingToggle);
         
         list->addItem(new tsl::elm::CustomDrawer([](tsl::gfx::Renderer *renderer, s32 x, s32 y, s32 w, s32 h) {
-            renderer->drawString(Print_x, false, x, y, 16, renderer->a(0xFFFF));
-    }), 500);
+            renderer->drawString(Print_x, false, x, y + 30, 16, renderer->a(0xFFFF));
+        }), 420);
 
         // Add the list to the frame for it to be drawn
         frame->setContent(list);
-        
         
         // Return the frame to have it become the top level element of this Gui
         return frame;
@@ -434,14 +450,14 @@ public:
 
     // Called once every frame to handle inputs not handled by other UI elements
     virtual bool handleInput(u64 keysDown, u64 keysHeld, const HidTouchState &touchPos, HidAnalogStickState joyStickPosLeft, HidAnalogStickState joyStickPosRight) override {
-        if (keysHeld & HidNpadButton_A) {
-            tsl::hlp::requestForeground(false);
-            return true;
-        }
-        if (keysHeld & HidNpadButton_StickR) {
-            changeReduceBatteryAgingState++;
-            return true;
-        }
+        // if (keysHeld & HidNpadButton_A) {
+        //     tsl::hlp::requestForeground(false);
+        //     return true;
+        // }
+        // if (keysHeld & HidNpadButton_StickR) {
+        //     changeReduceBatteryAgingState++;
+        //     return true;
+        // }
         return false;   // Return true here to singal the inputs have been consumed
     }
 };
