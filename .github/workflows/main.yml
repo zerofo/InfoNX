@@ -28,6 +28,7 @@ jobs:
     - name: Build
       run: |
         git config --global --add safe.directory `pwd`
+        git submodule update --remote 
         make -j $(nproc)
         ls -la
     - name: Upload file
