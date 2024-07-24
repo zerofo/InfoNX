@@ -1,0 +1,45 @@
+ame: NX_CI
+
+on:
+  push:
+    branches:
+      - master
+  release:
+    types: [published]
+
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: devkitpro/devkita64:latest
+
+    steps:
+    - name: spliting string
+      uses: winterjung/split@v2.1.0
+      id: repo
+      with:
+        msg: ${{ github.repository }}
+        separator: '/'
+    - name: Checkout
+      uses: actions/checkout@master
+      with:
+        ref: master
+        submodules: recursive
+    - name: Build
+      run: |
+        git config --global --add safe.directory `pwd`
+        make -j $(nproc)
+        ls build 
+    - name: Upload file
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ steps.repo.outputs._1 }} 
+        path: ./build/*.ovl
+    - name: Upload binaries to release
+      uses: svenstaro/upload-release-action@v2
+      with:
+        repo_token: ${{ secrets.release_token }}
+        file: ./build/*.ovl
+        tag: ${{ github.ref }}
+        overwrite: true
+        file_glob: true
